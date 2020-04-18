@@ -48,7 +48,7 @@ func newMQTTExporter() *mqttExporter {
 			prometheus.BuildFQName(progname, "build", "info"),
 			"Build info of this instance",
 			nil,
-			prometheus.Labels{"version": version, "commithash": build_hash, "builddate": build_date}),
+			prometheus.Labels{"version": version, "commithash": buildHash, "builddate": buildDate}),
 		connectDesc: prometheus.NewDesc(
 			prometheus.BuildFQName(progname, "mqtt", "connected"),
 			"Is the exporter connected to mqtt broker",
@@ -65,40 +65,40 @@ func newMQTTExporter() *mqttExporter {
 	return c
 }
 
-func (c *mqttExporter) Describe(ch chan<- *prometheus.Desc) {
+func (e *mqttExporter) Describe(ch chan<- *prometheus.Desc) {
 	mutex.RLock()
 	defer mutex.RUnlock()
-	ch <- c.versionDesc
-	ch <- c.connectDesc
-	for _, m := range c.counterMetrics {
+	ch <- e.versionDesc
+	ch <- e.connectDesc
+	for _, m := range e.counterMetrics {
 		m.Describe(ch)
 	}
-	for _, m := range c.metrics {
+	for _, m := range e.metrics {
 		m.Describe(ch)
 	}
 }
 
-func (c *mqttExporter) Collect(ch chan<- prometheus.Metric) {
+func (e *mqttExporter) Collect(ch chan<- prometheus.Metric) {
 	mutex.RLock()
 	defer mutex.RUnlock()
 	ch <- prometheus.MustNewConstMetric(
-		c.versionDesc,
+		e.versionDesc,
 		prometheus.GaugeValue,
 		1,
 	)
 	connected := 0.
-	if c.client.IsConnected() {
+	if e.client.IsConnected() {
 		connected = 1.
 	}
 	ch <- prometheus.MustNewConstMetric(
-		c.connectDesc,
+		e.connectDesc,
 		prometheus.GaugeValue,
 		connected,
 	)
-	for _, m := range c.counterMetrics {
+	for _, m := range e.counterMetrics {
 		m.Collect(ch)
 	}
-	for _, m := range c.metrics {
+	for _, m := range e.metrics {
 		m.Collect(ch)
 	}
 }
@@ -106,69 +106,78 @@ func (e *mqttExporter) receiveMessage() func(mqtt.Client, mqtt.Message) {
 	return func(c mqtt.Client, m mqtt.Message) {
 		mutex.Lock()
 		defer mutex.Unlock()
+
 		t := m.Topic()
 		t = strings.TrimPrefix(m.Topic(), *prefix)
 		t = strings.TrimPrefix(t, "/")
 		parts := strings.Split(t, "/")
+
 		if len(parts)%2 == 0 {
 			log.Warnf("Invalid topic: %s: odd number of levels, ignoring", t)
 			return
 		}
-		metric_name := parts[len(parts)-1]
-		pushed_metric_name := fmt.Sprintf("mqtt_%s_last_pushed_timestamp", metric_name)
-		count_metric_name := fmt.Sprintf("mqtt_%s_push_total", metric_name)
-		metric_labels := parts[:len(parts)-1]
+		metricName := parts[len(parts)-1]
+		pushedMetricName := fmt.Sprintf("mqtt_%s_last_pushed_timestamp", metricName)
+		countMetricName := fmt.Sprintf("mqtt_%s_push_total", metricName)
+		metricLabels := parts[:len(parts)-1]
+
 		var labels []string
 		labelValues := prometheus.Labels{}
-		log.Debugf("Metric name: %v", metric_name)
-		for i, l := range metric_labels {
+		log.Debugf("Metric name: %v", metricName)
+		for i, l := range metricLabels {
 			if i%2 == 1 {
 				continue
 			}
 			labels = append(labels, l)
-			labelValues[l] = metric_labels[i+1]
+			labelValues[l] = metricLabels[i+1]
 		}
 
 		invalidate := false
-		if _, ok := e.metricsLabels[metric_name]; ok {
-			l := e.metricsLabels[metric_name]
+		if _, ok := e.metricsLabels[metricName]; ok {
+			l := e.metricsLabels[metricName]
 			if !compareLabels(l, labels) {
-				log.Warnf("Label names are different: %v and %v, invalidating existing metric", l, labels)
-				prometheus.Unregister(e.metrics[metric_name])
+				log.Warnf("Label names are different for %s: %v and %v, invalidating existing metric", metricName, l, labels)
+				prometheus.Unregister(e.metrics[metricName])
 				invalidate = true
 			}
 		}
-		e.metricsLabels[metric_name] = labels
-		if _, ok := e.metrics[metric_name]; ok && !invalidate {
+		e.metricsLabels[metricName] = labels
+		if _, ok := e.metrics[metricName]; ok && !invalidate {
 			log.Debugf("Metric already exists")
 		} else {
-			log.Debugf("Creating new metric: %s %v", metric_name, labels)
-			e.metrics[metric_name] = prometheus.NewGaugeVec(
+			log.Debugf("Creating new metric: %s %v", metricName, labels)
+			e.metrics[metricName] = prometheus.NewGaugeVec(
 				prometheus.GaugeOpts{
-					Name: metric_name,
+					Name: metricName,
 					Help: "Metric pushed via MQTT",
 				},
 				labels,
 			)
-			e.counterMetrics[count_metric_name] = prometheus.NewCounterVec(
+			e.counterMetrics[countMetricName] = prometheus.NewCounterVec(
 				prometheus.CounterOpts{
-					Name: count_metric_name,
-					Help: fmt.Sprintf("Number of times %s was pushed via MQTT", metric_name),
+					Name: countMetricName,
+					Help: fmt.Sprintf("Number of times %s was pushed via MQTT", metricName),
 				},
 				labels,
 			)
-			e.metrics[pushed_metric_name] = prometheus.NewGaugeVec(
+			e.metrics[pushedMetricName] = prometheus.NewGaugeVec(
 				prometheus.GaugeOpts{
-					Name: pushed_metric_name,
-					Help: fmt.Sprintf("Last time %s was pushed via MQTT", metric_name),
+					Name: pushedMetricName,
+					Help: fmt.Sprintf("Last time %s was pushed via MQTT", metricName),
 				},
 				labels,
 			)
 		}
-		if s, err := strconv.ParseFloat(string(m.Payload()), 64); err == nil {
-			e.metrics[metric_name].With(labelValues).Set(s)
-			e.metrics[pushed_metric_name].With(labelValues).SetToCurrentTime()
-			e.counterMetrics[count_metric_name].With(labelValues).Inc()
+
+		// data comes in graphite format: $value $timestamp  i.e.
+		// 142168064.000000 1587222782
+		//
+		data := strings.Split(string(m.Payload()), " ")
+
+		if s, err := strconv.ParseFloat(data[0], 64); err == nil {
+			e.metrics[metricName].With(labelValues).Set(s)
+			e.metrics[pushedMetricName].With(labelValues).SetToCurrentTime()
+			e.counterMetrics[countMetricName].With(labelValues).Inc()
 		}
 	}
 }

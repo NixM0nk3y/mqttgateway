@@ -15,10 +15,10 @@ all: test build
 
 deps: 
 build: 
-		$(GOBUILD) -race -ldflags " \
+		$(GOBUILD) -ldflags " \
 		-X main.version=${VERSION} \
-		-X main.build_hash=${COMMIT} \
-		-X main.build_date=${DATE}" \
+		-X main.buildHash=${COMMIT} \
+		-X main.buildDate=${DATE}" \
 		-o $(BINARY_NAME) -v
 test: 
 		$(GOTEST) -v ./...
