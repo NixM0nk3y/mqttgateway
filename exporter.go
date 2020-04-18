@@ -48,7 +48,7 @@ func newMQTTExporter() *mqttExporter {
 			prometheus.BuildFQName(progname, "build", "info"),
 			"Build info of this instance",
 			nil,
-			prometheus.Labels{"version": version}),
+			prometheus.Labels{"version": version, "commithash": build_hash, "builddate": build_date}),
 		connectDesc: prometheus.NewDesc(
 			prometheus.BuildFQName(progname, "mqtt", "connected"),
 			"Is the exporter connected to mqtt broker",
