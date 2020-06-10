@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"math/rand"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/prometheus/client_golang/prometheus"
@@ -21,6 +22,18 @@ type mqttExporter struct {
 	metrics        map[string]*prometheus.GaugeVec   // hold the metrics collected
 	counterMetrics map[string]*prometheus.CounterVec // hold the metrics collected
 	metricsLabels  map[string][]string               // holds the labels set for each metric to be able to invalidate them
+}
+
+const alphanum string = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+// RandomString returns a random string of alpha-numeric characters
+func RandomString(n int) string {
+	var bytes = make([]byte, n)
+	rand.Read(bytes)
+	for i, b := range bytes {
+		bytes[i] = alphanum[b%byte(len(alphanum))]
+	}
+	return string(bytes)
 }
 
 func newMQTTExporter() *mqttExporter {
@@ -43,7 +56,13 @@ func newMQTTExporter() *mqttExporter {
 	}
 	if *clientID != "" {
 		options.SetClientID(*clientID)
-	}
+	} else {
+		options.SetClientID("mqttExporter-" + RandomString(5))
+        }
+
+        // already the default
+        options.SetAutoReconnect(true)
+
 	m := mqtt.NewClient(options)
 	if token := m.Connect(); token.Wait() && token.Error() != nil {
 		log.Fatal(token.Error())
