@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/prometheus/client_golang/prometheus"
@@ -25,6 +26,13 @@ type mqttExporter struct {
 func newMQTTExporter() *mqttExporter {
 	// create a MQTT client
 	options := mqtt.NewClientOptions()
+
+        // keep a active connection
+        options.SetKeepAlive(3 * time.Second)
+
+        // maintain subs
+        options.SetCleanSession(false)
+
 	log.Infof("Connecting to %v", *brokerAddress)
 	options.AddBroker(*brokerAddress)
 	if *username != "" {
